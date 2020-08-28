@@ -9,7 +9,7 @@
 //
 // Author: Mike McCauley (mikem@airspayce.com)
 // Copyright (C) 2011 Mike McCauley
-// $Id: RHRouter.cpp,v 1.8 2017/06/25 09:41:17 mikem Exp $
+// $Id: RHRouter.cpp,v 1.10 2020/08/04 09:02:14 mikem Exp $
 
 #include <RHRouter.h>
 
@@ -21,6 +21,7 @@ RHRouter::RHRouter(RHGenericDriver& driver, uint8_t thisAddress)
     : RHReliableDatagram(driver, thisAddress)
 {
     _max_hops = RH_DEFAULT_MAX_HOPS;
+    _isa_router = true;
     clearRoutingTable();
 }
 
@@ -31,7 +32,6 @@ bool RHRouter::init()
     bool ret = RHReliableDatagram::init();
     if (ret)
 	_max_hops = RH_DEFAULT_MAX_HOPS;
-	_max_routing = RH_ROUTING_TABLE_SIZE;
     return ret;
 }
 
@@ -42,18 +42,17 @@ void RHRouter::setMaxHops(uint8_t max_hops)
 }
 
 ////////////////////////////////////////////////////////////////////
-void RHRouter::setMaxRouting(uint8_t max_routing)
+void RHRouter::setIsaRouter(bool isa_router)
 {
-    _max_routing = max_routing;
+    _isa_router = isa_router;
 }
-
 ////////////////////////////////////////////////////////////////////
 void RHRouter::addRouteTo(uint8_t dest, uint8_t next_hop, uint8_t state)
 {
     uint8_t i;
 
     // First look for an existing entry we can update
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
     {
 	if (_routes[i].dest == dest)
 	{
@@ -65,7 +64,7 @@ void RHRouter::addRouteTo(uint8_t dest, uint8_t next_hop, uint8_t state)
     }
 
     // Look for an invalid entry we can use
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
     {
 	if (_routes[i].state == Invalid)
 	{
@@ -79,7 +78,7 @@ void RHRouter::addRouteTo(uint8_t dest, uint8_t next_hop, uint8_t state)
     // Need to make room for a new one
     retireOldestRoute();
     // Should be an invalid slot now
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
     {
 	if (_routes[i].state == Invalid)
 	{
@@ -94,7 +93,7 @@ void RHRouter::addRouteTo(uint8_t dest, uint8_t next_hop, uint8_t state)
 RHRouter::RoutingTableEntry* RHRouter::getRouteTo(uint8_t dest)
 {
     uint8_t i;
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
 	if (_routes[i].dest == dest && _routes[i].state != Invalid)
 	    return &_routes[i];
     return NULL;
@@ -105,8 +104,8 @@ void RHRouter::deleteRoute(uint8_t index)
 {
     // Delete a route by copying following routes on top of it
     memcpy(&_routes[index], &_routes[index+1], 
-	   sizeof(RoutingTableEntry) * (_max_routing - index - 1));
-    _routes[_max_routing - 1].state = Invalid;
+	   sizeof(RoutingTableEntry) * (RH_ROUTING_TABLE_SIZE - index - 1));
+    _routes[RH_ROUTING_TABLE_SIZE - 1].state = Invalid;
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -114,7 +113,7 @@ void RHRouter::printRoutingTable()
 {
 #ifdef RH_HAVE_SERIAL
     uint8_t i;
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
     {
 	Serial.print(i, DEC);
 	Serial.print(" Dest: ");
@@ -131,7 +130,7 @@ void RHRouter::printRoutingTable()
 bool RHRouter::deleteRouteTo(uint8_t dest)
 {
     uint8_t i;
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
     {
 	if (_routes[i].dest == dest)
 	{
@@ -153,7 +152,7 @@ void RHRouter::retireOldestRoute()
 void RHRouter::clearRoutingTable()
 {
     uint8_t i;
-    for (i = 0; i < _max_routing; i++)
+    for (i = 0; i < RH_ROUTING_TABLE_SIZE; i++)
 	_routes[i].state = Invalid;
 }
 
@@ -204,13 +203,13 @@ uint8_t RHRouter::route(RoutedMessage* message, uint8_t messageLen)
 // Subclasses may want to override this to peek at messages going past
 void RHRouter::peekAtMessage(RoutedMessage* message, uint8_t messageLen)
 {
-    // Default does nothing
+  // Default does nothing
   (void)message; // Not used
   (void)messageLen; // Not used
 }
 
 ////////////////////////////////////////////////////////////////////
-bool RHRouter::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t* dest, uint8_t* id, uint8_t* flags)
+bool RHRouter::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t* dest, uint8_t* id, uint8_t* flags, uint8_t* hops)
 {  
     uint8_t tmpMessageLen = sizeof(_tmpMessage);
     uint8_t _from;
@@ -258,7 +257,7 @@ bool RHRouter::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t*
 	    || (_thisAddress == 4 && _from == 2)
 
 #endif
-)
+	    )
 	{
 	    // OK
 	}
@@ -277,6 +276,7 @@ bool RHRouter::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t*
 	    if (dest)   *dest    = _tmpMessage.header.dest;
 	    if (id)     *id      = _tmpMessage.header.id;
 	    if (flags)  *flags   = _tmpMessage.header.flags;
+	    if (hops)   *hops    = _tmpMessage.header.hops;
 	    uint8_t msgLen = tmpMessageLen - sizeof(RoutedMessageHeader);
 	    if (*len > msgLen)
 		*len = msgLen;
@@ -289,7 +289,10 @@ bool RHRouter::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t*
 	    // Maybe it has to be routed to the next hop
 	    // REVISIT: if it fails due to no route or unable to deliver to the next hop, 
 	    // tell the originator. BUT HOW?
-	    route(&_tmpMessage, tmpMessageLen);
+	    
+	    // If we are forwarding packets, do so. Otherwise, drop.
+	    if (_isa_router)
+	        route(&_tmpMessage, tmpMessageLen);
 	}
 	// Discard it and maybe wait for another
     }
@@ -297,7 +300,7 @@ bool RHRouter::recvfromAck(uint8_t* buf, uint8_t* len, uint8_t* source, uint8_t*
 }
 
 ////////////////////////////////////////////////////////////////////
-bool RHRouter::recvfromAckTimeout(uint8_t* buf, uint8_t* len, uint16_t timeout, uint8_t* source, uint8_t* dest, uint8_t* id, uint8_t* flags)
+bool RHRouter::recvfromAckTimeout(uint8_t* buf, uint8_t* len, uint16_t timeout, uint8_t* source, uint8_t* dest, uint8_t* id, uint8_t* flags, uint8_t* hops)
 {  
     unsigned long starttime = millis();
     int32_t timeLeft;
@@ -305,10 +308,11 @@ bool RHRouter::recvfromAckTimeout(uint8_t* buf, uint8_t* len, uint16_t timeout, 
     {
 	if (waitAvailableTimeout(timeLeft))
 	{
-	    if (recvfromAck(buf, len, source, dest, id, flags))
+	    if (recvfromAck(buf, len, source, dest, id, flags, hops))
 		return true;
 	}
 	YIELD;
     }
     return false;
 }
+
