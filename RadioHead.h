@@ -1199,6 +1199,10 @@ these examples and explanations and extend them to suit your needs.
  #include <SPI.h>
  #define RH_HAVE_HARDWARE_SPI
  #define RH_HAVE_SERIAL
+ // You can enable MUTEX to protect critical sections for multicores or multitasking
+ // if using EEPROM you need to enable it because the flash access conflict,
+ // and created the external definition SemaphoreHandle_t for RH_RF95 (), see example rf95/rf95_server_esp32 or client
+ #define RH_USE_MUTEX
 
 #elif (RH_PLATFORM == RH_PLATFORM_MSP430) // LaunchPad specific
  #include "legacymsp430.h"
@@ -1269,6 +1273,8 @@ these examples and explanations and extend them to suit your needs.
  #define RH_HAVE_HARDWARE_SPI
  #define RH_HAVE_SERIAL
  #define PROGMEM
+ // You can enable MUTEX to protect critical sections for multithreading						   
+ // #define RH_USE_MUTEX
  #include <RHutil/RasPi.h>
  #include <string.h>
  //Define SS for CS0 or pin 24
@@ -1323,7 +1329,7 @@ these examples and explanations and extend them to suit your needs.
  #define ATOMIC_BLOCK_START { uint32_t __savedPS = xt_rsil(15);
  #define ATOMIC_BLOCK_END xt_wsr_ps(__savedPS);}
 #elif (RH_PLATFORM == RH_PLATFORM_ESP32)
-// see hardware/esp32/1.0.4/tools/sdk/include/esp32/xtensa/xruntime.h
+// jPerotto see hardware/esp32/1.0.4/tools/sdk/include/esp32/xtensa/xruntime.h
  #define ATOMIC_BLOCK_START uint32_t volatile register ilevel = XTOS_DISABLE_ALL_INTERRUPTS;
  #define ATOMIC_BLOCK_END XTOS_RESTORE_INTLEVEL(ilevel);
 #else 
@@ -1340,6 +1346,9 @@ these examples and explanations and extend them to suit your needs.
  #define YIELD yield();
 #elif (RH_PLATFORM == RH_PLATFORM_ESP8266)
 // ESP8266 also has it
+ #define YIELD yield();
+#elif (RH_PLATFORM == RH_PLATFORM_ESP32)
+// ESP32 also has it
  #define YIELD yield();
 #else
  #define YIELD
@@ -1428,6 +1437,36 @@ these examples and explanations and extend them to suit your needs.
   #error "Dont know how to define htons and friends for this processor" 
  #endif
 #endif
+
+// Some platforms need a mutex for multihreaded case
+// implemented by jPerotto from use freertos and pthread
+#ifdef RH_USE_MUTEX
+#if(RH_PLATFORM == RH_PLATFORM_RASPI)
+#include <pthread.h>
+#define RH_DECLARE_MUTEX(lock) pthread_mutex_t lock;
+#define RH_MUTEX_INIT(lock) pthread_mutex_init(&lock, NULL)
+#define RH_MUTEX_LOCK(lock) pthread_mutex_lock(&lock)
+#define RH_MUTEX_UNLOCK(lock) pthread_mutex_unlock(&lock)
+#elif (RH_PLATFORM == RH_PLATFORM_ESP32)
+#define RH_DECLARE_MUTEX(RH_Mutex) RH_Mutex = new SemaphoreHandle_t; RH_Mutex = xSemaphoreCreateMutex()
+#define RH_MUTEX_INIT(RH_Mutex) RH_Mutex
+#define RH_MUTEX_LOCK(RH_Mutex) xSemaphoreTake(RH_Mutex, portMAX_DELAY)
+#define RH_MUTEX_UNLOCK(RH_Mutex) xSemaphoreGive(RH_Mutex)
+#else
+#include <tools/freertos/semphr.h>
+#define RH_DECLARE_MUTEX(RH_Mutex) RH_Mutex = new SemaphoreHandle_t; RH_Mutex = xSemaphoreCreateMutex()
+#define RH_MUTEX_INIT(RH_Mutex) RH_Mutex
+#define RH_MUTEX_LOCK(RH_Mutex) xSemaphoreTake(RH_Mutex, portMAX_DELAY)
+#define RH_MUTEX_UNLOCK(RH_Mutex) xSemaphoreGive(RH_Mutex)
+#endif
+#else
+#define RH_DECLARE_MUTEX(RH_Mutex)
+#define RH_MUTEX_INIT(RH_Mutex)
+#define RH_MUTEX_LOCK(RH_Mutex)
+#define RH_MUTEX_UNLOCK(RH_Mutex)
+#endif
+
+
 
 // This is the address that indicates a broadcast
 #define RH_BROADCAST_ADDRESS 0xff
